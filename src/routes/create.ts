@@ -12,8 +12,6 @@ export default async function create(req: Request) {
   if (!json.text) return new Response("Invalid request.", { status: 200 });
 
   return new Response(
-    JSON.stringify({
-      text: `${Bun.env.PROTOCOL}://${Bun.env.SERVER_URL}/${btoa(json.text)}`,
-    })
+    `${Bun.env.PROTOCOL}://${Bun.env.SERVER_URL}/raw/${btoa(json.text)}`
   );
 }
