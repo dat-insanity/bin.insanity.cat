@@ -1,9 +1,9 @@
-import create from "./routes/create.ts";
+import router from "./utils/router.ts";
 
 Bun.serve({
   port: Bun.env.PORT,
   hostname: Bun.env.HOSTNAME,
   fetch(req) {
-    return create(req);
+    return router(req);
   },
 });
