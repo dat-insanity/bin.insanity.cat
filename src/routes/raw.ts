@@ -1,3 +1,5 @@
+import * as database from "../utils/database";
+
 export default async function paste(req: Request) {
   try {
     if (req.method != "GET")
@@ -9,9 +11,11 @@ export default async function paste(req: Request) {
       return new Response("404: Page not found.", { status: 404 });
     }
 
-    if (url.pathname.split("/")[2]) {
-      console.log(url.pathname.split("/")[2]);
-      return new Response(atob(url.pathname.split("/")[2]));
+    if (
+      url.pathname.split("/")[2] &&
+      Number.isInteger(parseInt(url.pathname.split("/")[2]))
+    ) {
+      return new Response(database.getText(url.pathname.split("/")[2]));
     }
 
     return new Response("404: Page not found.", { status: 404 });
