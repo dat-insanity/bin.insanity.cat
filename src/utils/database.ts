@@ -10,7 +10,7 @@ createTable.run();
  * inserts text into db.
  *
  * @param text the paste text to insert.
- * @returns the number which is the id.
+ * @returns the id of the entry that was just inserted.
  */
 export function writeText(text: string): number {
   const insertPaste = db.query(`INSERT INTO pastes (text) VALUES ($text);`);
@@ -30,10 +30,10 @@ export function writeText(text: string): number {
  * retrieves text from db.
  *
  * @param id the id of the paste text to retrieve.
- * @returns an array of pastes.
+ * @returns the text from the db.
  */
-export function getText(id: number): { id: number; text: string } {
+export function getText(id: number | string): string {
   const query = db.query(`SELECT text FROM pastes WHERE id = $id;`);
-  const paste = query.get({ $id: id }) as { id: number; text: string };
+  const paste = (query.get({ $id: id }) as { text: string }).text;
   return paste;
 }
