@@ -1,3 +1,5 @@
+import * as database from "../utils/database";
+
 export default async function create(req: Request) {
   if (req.method != "POST")
     return new Response("Method Not Allowed", { status: 405 });
@@ -11,7 +13,13 @@ export default async function create(req: Request) {
 
   if (!json.text) return new Response("Invalid request.", { status: 200 });
 
-  return new Response(
-    `${Bun.env.PROTOCOL}://${Bun.env.SERVER_URL}/raw/${btoa(json.text)}`
-  );
+  try {
+    const id = database.writeText(json.text);
+    return new Response(
+      `${Bun.env.PROTOCOL}://${Bun.env.SERVER_URL}/raw/${id}`
+    );
+  } catch (err) {
+    console.error(err);
+    return new Response("Internal server error.", { status: 500 });
+  }
 }
