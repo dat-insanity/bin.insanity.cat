@@ -32,7 +32,7 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: text }),
           })
-            .then((response) => response.text()) // read the response as text
+            .then((response) => response.text())
             .then((data) => (window.location.href = data));
         });
       };
@@ -171,15 +171,13 @@
         <button class="mainbutton" id="send">save</button>
       </div>
     </header>
-
     <main class="container">
       <textarea
         id="paste"
         placeholder="paste your text here..."
-        rows="8"
+        rows="1"
         tabindex="1"
-      >
-      </textarea>
+      ></textarea>
     </main>
   </body>
 </html>
