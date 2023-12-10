@@ -17,6 +17,13 @@ if (
       return router(req);
     },
   });
+
+  // startup message
+  console.log("==== 🗑 bin.insanity.cat is active 🐱 ====");
+  console.log(
+    `🔗 URL: ${Bun.env.PROTOCOL}://${Bun.env.HOSTNAME}:${Bun.env.PORT}`
+  );
+  console.log("=========================================");
 } else {
   throw new Error(
     "Missing environment variables. A template is provided at .env.example."
