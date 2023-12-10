@@ -11,7 +11,7 @@ export default async function create(req: Request) {
     return new Response("Bad Request", { status: 400 });
   }
 
-  if (!json.text) return new Response("Invalid request.", { status: 200 });
+  if (!json.text) return new Response("Invalid request.", { status: 400 });
 
   try {
     const id = database.writeText(json.text);
