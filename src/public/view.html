@@ -16,6 +16,19 @@
           document.getElementById("paste").textContent = `⚠️ ${error} ⚠️`;
           document.getElementById("paste").style.color = "red";
         });
+
+      fetch(`/raw/title${new URL(window.location.href).pathname}`)
+        .then((response) => {
+          if (!response.ok) throw new Error(response.statusText);
+          return response.text();
+        })
+        .then((text) => {
+          document.getElementById("title").textContent = text;
+        })
+        .catch((error) => {
+          document.getElementById("title").textContent = `⚠️ ${error} ⚠️`;
+          document.getElementById("title").style.color = "red";
+        });
     </script>
     <style>
       html,
@@ -72,6 +85,7 @@
         width: 100%;
         font-family: monospace;
         margin-top: 3px;
+        white-space: pre-wrap;
       }
       .title {
         background: transparent;
@@ -153,7 +167,8 @@
       <a class="mainbutton" href="/">new</a>
     </header>
     <main class="container">
-      <p id="paste"></p>
+      <h1 class="title" id="title">Loading...</h1>
+      <p id="paste">Loading...</p>
     </main>
   </body>
 </html>
