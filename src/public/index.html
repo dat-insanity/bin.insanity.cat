@@ -6,6 +6,7 @@
     <script>
       window.onload = function () {
         const textarea = document.getElementById("paste");
+        const titleInput = document.getElementById("title");
         const clearBtn = document.getElementById("clear");
         const sendBtn = document.getElementById("send");
 
@@ -27,10 +28,11 @@
 
         sendBtn.addEventListener("click", function () {
           const text = textarea.value;
+          const title = titleInput.value;
           fetch("/create", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: text }),
+            body: JSON.stringify({ text: text, title: title }),
           })
             .then((response) => response.text())
             .then((data) => (window.location.href = data));
@@ -98,6 +100,16 @@
         outline: none;
         resize: none;
         width: 100%;
+      }
+      input {
+        background: transparent;
+        color: white;
+        font-size: 32px;
+        line-height: 2;
+        border: none;
+        outline: none;
+        resize: none;
+        font-weight: 700;
       }
       div svg {
         fill: none;
@@ -172,11 +184,18 @@
       </div>
     </header>
     <main class="container">
+      <input
+        type="text"
+        id="title"
+        name="title"
+        tabindex="1"
+        placeholder="untitled"
+      />
       <textarea
         id="paste"
         placeholder="paste your text here..."
         rows="1"
-        tabindex="1"
+        tabindex="2"
       ></textarea>
     </main>
   </body>

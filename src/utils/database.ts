@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 
 const db = new Database("pastes.sqlite", { create: true });
 const createTable = db.query(
-  `CREATE TABLE IF NOT EXISTS pastes (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT);`
+  `CREATE TABLE IF NOT EXISTS pastes (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, title TINYTEXT);`
 );
 createTable.run();
 
@@ -10,15 +10,18 @@ createTable.run();
  * inserts text into db.
  *
  * @param {string} text the paste text to insert.
+ * @param {string} title the paste title to insert.
  * @returns {number} the id of the entry that was just inserted.
  * @throws {Error} throws an error if it fails to retrieve the last inserted ID.
  */
-export function writeText(text: string): number {
-  const insertPaste = db.query(`INSERT INTO pastes (text) VALUES ($text);`);
-  insertPaste.run({ $text: text });
+export function writeText(text: string, title: string): number {
+  const insertPaste = db.query(
+    `INSERT INTO pastes (title, text) VALUES ($title, $text);`
+  );
+  insertPaste.run({ $text: text, $title: title });
 
   const lastID = db.query(`SELECT last_insert_rowid() AS id;`);
-  const result = lastID.get() as { id: number; text: string };
+  const result = lastID.get() as { id: number };
 
   if (result && typeof result.id === "number") {
     return result.id;

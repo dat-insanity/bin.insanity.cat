@@ -14,7 +14,7 @@ export default async function create(req: Request) {
   if (!json.text) return new Response("Invalid request.", { status: 400 });
 
   try {
-    const id = database.writeText(json.text);
+    const id = database.writeText(json.text, json.title);
     return new Response(
       `${Bun.env.PROTOCOL}://${Bun.env.SERVER_URL}/raw/${id}`
     );
