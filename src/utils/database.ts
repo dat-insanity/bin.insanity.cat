@@ -41,3 +41,15 @@ export function getText(id: number | string): string {
   const paste = (query.get({ $id: id }) as { text: string }).text;
   return paste;
 }
+
+/**
+ * retrieves title from db.
+ *
+ * @param {(number|string)} id the id of the paste title to retrieve.
+ * @returns {string} the title from the db.
+ */
+export function getTitle(id: number | string): string {
+  const query = db.query(`SELECT title FROM pastes WHERE id = $id;`);
+  const title = (query.get({ $id: id }) as { title: string }).title;
+  return title;
+}
