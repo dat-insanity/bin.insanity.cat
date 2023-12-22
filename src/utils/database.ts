@@ -9,8 +9,9 @@ createTable.run();
 /**
  * inserts text into db.
  *
- * @param text the paste text to insert.
- * @returns the id of the entry that was just inserted.
+ * @param {string} text the paste text to insert.
+ * @returns {number} the id of the entry that was just inserted.
+ * @throws {Error} throws an error if it fails to retrieve the last inserted ID.
  */
 export function writeText(text: string): number {
   const insertPaste = db.query(`INSERT INTO pastes (text) VALUES ($text);`);
@@ -29,8 +30,8 @@ export function writeText(text: string): number {
 /**
  * retrieves text from db.
  *
- * @param id the id of the paste text to retrieve.
- * @returns the text from the db.
+ * @param {(number|string)} id the id of the paste text to retrieve.
+ * @returns {string} the text from the db.
  */
 export function getText(id: number | string): string {
   const query = db.query(`SELECT text FROM pastes WHERE id = $id;`);
