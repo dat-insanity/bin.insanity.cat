@@ -15,9 +15,7 @@ export default async function create(req: Request) {
 
   try {
     const id = database.writeText(json.text, json.title);
-    return new Response(
-      `${Bun.env.PROTOCOL}://${Bun.env.SERVER_URL}/raw/${id}`
-    );
+    return new Response(`${Bun.env.PROTOCOL}://${Bun.env.SERVER_URL}/${id}`);
   } catch (err) {
     console.error(err);
     return new Response("Internal server error.", { status: 500 });
