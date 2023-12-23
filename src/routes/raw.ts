@@ -6,16 +6,14 @@ export default async function paste(req: Request) {
       return new Response("Method Not Allowed", { status: 405 });
 
     const url = new URL(req.url);
+    const urlPath = url.pathname.split("/");
 
-    if (url.pathname.split("/").length > 3) {
+    if (urlPath.length > 3) {
       return new Response("404: Page not found.", { status: 404 });
     }
 
-    if (
-      url.pathname.split("/")[2] &&
-      Number.isInteger(parseInt(url.pathname.split("/")[2]))
-    ) {
-      return new Response(database.getText(url.pathname.split("/")[2]));
+    if (urlPath[2] && Number.isInteger(parseInt(urlPath[2]))) {
+      return new Response(database.getText(urlPath[2]));
     }
 
     return new Response("404: Page not found.", { status: 404 });
