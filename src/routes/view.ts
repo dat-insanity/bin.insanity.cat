@@ -1,4 +1,5 @@
 import * as database from "../utils/database";
+import { redirectLegacyPaste } from "../utils/legacy";
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (character) => ({
@@ -45,12 +46,13 @@ export default async function view(req: Request) {
 
   try {
     const url = new URL(req.url);
-    const id = url.pathname.slice(1);
-    const paste = database.getPaste(id);
-    if (!paste) return new Response("404: Page not found.", { status: 404, headers });
+    const slug = url.pathname.slice(1);
+    const paste = database.getPaste(slug);
+    if (!paste) return redirectLegacyPaste(req, slug)
+      ?? new Response("404: Page not found.", { status: 404, headers });
 
     const editKey = url.searchParams.get("EDIT");
-    const editable = database.canEdit(id, editKey);
+    const editable = database.canEdit(slug, editKey);
     if (req.method === "GET") {
       const template = await Bun.file(
         editable ? "./src/public/edit.html" : "./src/public/view.html"
@@ -58,7 +60,7 @@ export default async function view(req: Request) {
       const origin = Bun.env.SERVER_URL
         ? `${Bun.env.PROTOCOL || "http"}://${Bun.env.SERVER_URL}`
         : url.origin;
-      const publicUrl = new URL(`/${paste.id}`, origin).toString();
+      const publicUrl = new URL(`/${paste.slug}`, origin).toString();
       const tags = metadata(paste, publicUrl);
       const html = template.replace(/\{\{(TITLE|TEXT|METADATA)\}\}/g, (_, field) =>
         field === "METADATA" ? tags : escapeHtml(field === "TITLE" ? paste.title ?? "" : paste.text)
@@ -73,7 +75,7 @@ export default async function view(req: Request) {
     }
 
     if (req.method === "DELETE") {
-      return database.deletePaste(id, editKey)
+      return database.deletePaste(slug, editKey)
         ? new Response(null, { status: 204, headers })
         : new Response("404: Page not found.", { status: 404, headers });
     }
@@ -91,7 +93,7 @@ export default async function view(req: Request) {
       (json.title !== undefined && typeof json.title !== "string")
     ) return new Response("Invalid request.", { status: 400, headers });
 
-    return database.updateText(id, editKey, json.text, json.title ?? "")
+    return database.updateText(slug, editKey, json.text, json.title ?? "")
       ? new Response(null, { status: 204, headers })
       : new Response("404: Page not found.", { status: 404, headers });
   } catch (err) {

@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test, type Mock } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmdirSync, unlinkSync } from "node:fs";
@@ -10,6 +10,7 @@ Bun.env.DATABASE_PATH = ":memory:";
 const { default: create } = await import("./create");
 const { default: router } = await import("../utils/router");
 const database = await import("../utils/database");
+const slugs = await import("../utils/slug");
 const url = "http://localhost/create";
 
 async function createPost(text = "sample text", title = "sample title") {
@@ -76,7 +77,7 @@ test("writes text to the database and returns a URL", async () => {
   const res = await create(req);
   expect(res.status).toBe(200);
   const editUrl = new URL(await res.text());
-  expect(editUrl.pathname).toMatch(/^\/[1-9]\d*$/);
+  expect(editUrl.pathname).toMatch(/^\/[a-z0-9]{8}$/);
   expect(editUrl.searchParams.get("EDIT")).toMatch(/^[a-f0-9]{64}$/);
   expect(res.headers.get("Cache-Control")).toBe("no-store");
   const raw = await router(new Request(new URL(`/raw${editUrl.pathname}`, editUrl).href));
@@ -87,6 +88,39 @@ test("each post gets a different edit key", async () => {
   const first = await createPost();
   const second = await createPost();
   expect(first.searchParams.get("EDIT")).not.toBe(second.searchParams.get("EDIT"));
+  expect(first.pathname).not.toBe(second.pathname);
+});
+
+test("slug collisions are retried without overwriting another post", () => {
+  const existing = database.writeText("original contents", "original title");
+  let availableSlug = slugs.generateSlug();
+  while (database.getPaste(availableSlug)) availableSlug = slugs.generateSlug();
+  // The older bun-types package models function spies as property getters.
+  const generator = spyOn(slugs, "generateSlug") as unknown as Mock<typeof slugs.generateSlug>;
+  generator.mockReturnValueOnce(existing.slug).mockReturnValueOnce(availableSlug);
+  try {
+    const created = database.writeText("new contents", "new title");
+    expect(generator).toHaveBeenCalledTimes(2);
+    expect(created.slug).toBe(availableSlug);
+    expect(database.getPaste(existing.slug)!.text).toBe("original contents");
+    expect(database.getPaste(created.slug)!.text).toBe("new contents");
+    expect(database.canEdit(created.slug, created.editKey)).toBe(true);
+  } finally {
+    generator.mockRestore();
+  }
+});
+
+test("new posts cannot be reached by their internal numeric IDs", async () => {
+  const post = database.writeText("slug-only post", "title");
+  for (const prefix of ["", "/raw", "/raw/title"]) {
+    const numericUrl = `http://localhost${prefix}/${post.id}?EDIT=${post.editKey}`;
+    expect((await router(new Request(numericUrl))).status).toBe(404);
+  }
+  for (const method of ["PUT", "DELETE"]) {
+    expect((await mutate(new URL(`http://localhost/${post.id}?EDIT=${post.editKey}`), method,
+      method === "PUT" ? { text: "tampered" } : undefined)).status).toBe(404);
+  }
+  expect(database.getPaste(post.slug)!.text).toBe("slug-only post");
 });
 
 test("valid edit links show populated fields, save, and delete", async () => {
@@ -189,7 +223,7 @@ test("post content is escaped in both the public view and editor", async () => {
 });
 
 test("invalid paths and missing posts return 404; unsupported methods return 405", async () => {
-  for (const path of ["/0", "/-1", "/123suffix", "/raw/1suffix", "/raw/title/1suffix", "/999999", "/raw/999999", "/raw/title/999999"]) {
+  for (const path of ["/0", "/-1", "/123suffix", "/raw/1suffix", "/raw/title/1suffix", "/999999", "/raw/999999", "/raw/title/999999", "/abcDEF12", "/abcdefg", "/abcdefghi", "/abc_def1", "/raw/ABCDEF12", "/raw/title/abcdefg", "/abcdefg1/extra"]) {
     expect((await router(new Request(new URL(path, url).href))).status).toBe(404);
   }
   const editUrl = await createPost();
@@ -240,15 +274,15 @@ test("publication timestamps are stored at creation and preserved by edits", asy
   const before = Date.now();
   const editUrl = await createPost();
   const after = Date.now();
-  const id = editUrl.pathname.slice(1);
-  const createdAt = database.getPaste(id)!.created_at!;
+  const slug = editUrl.pathname.slice(1);
+  const createdAt = database.getPaste(slug)!.created_at!;
   expect(createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   expect(Date.parse(createdAt)).toBeGreaterThanOrEqual(before);
   expect(Date.parse(createdAt)).toBeLessThanOrEqual(after);
   expect(metaContent(await (await router(new Request(editUrl.href))).text(), "article:published_time"))
     .toBe(createdAt);
   expect((await mutate(editUrl, "PUT", { text: "new body", title: "new title" })).status).toBe(204);
-  expect(database.getPaste(id)!.created_at).toBe(createdAt);
+  expect(database.getPaste(slug)!.created_at).toBe(createdAt);
   editUrl.search = "";
   const html = await (await router(new Request(editUrl.href))).text();
   expect(metaContent(html, "article:published_time")).toBe(createdAt);
@@ -281,19 +315,25 @@ test("preview and canonical URLs use the public host and exclude edit keys and o
   }
 });
 
-for (const hasEditKeys of [false, true]) {
-test(`existing databases ${hasEditKeys ? "with" : "without"} edit keys migrate safely`, () => {
+for (const schema of ["original", "edit keys", "publication dates"] as const) {
+  const hasEditKeys = schema !== "original";
+  const hasPublicationDates = schema === "publication dates";
+test(`existing databases with ${schema} schema migrate safely to slugs`, () => {
   const directory = mkdtempSync(join(tmpdir(), "bin-insanity-cat-test-"));
   const databasePath = join(directory, "legacy.sqlite");
   const legacy = new Database(databasePath, { create: true });
   legacy.query(`CREATE TABLE pastes (
     id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, title TINYTEXT
     ${hasEditKeys ? ", edit_key_hash TEXT" : ""}
+    ${hasPublicationDates ? ", created_at TEXT" : ""}
   );`).run();
   legacy.query("INSERT INTO pastes (text, title) VALUES ('old text', 'old title');").run();
   if (hasEditKeys) {
     legacy.query("INSERT INTO pastes (text, title, edit_key_hash) VALUES ('owned text', 'owned title', $key);")
       .run({ $key: createHash("sha256").update("legacy-key").digest("hex") });
+  }
+  if (hasPublicationDates) {
+    legacy.query("UPDATE pastes SET created_at = '2023-10-01T12:34:56.000Z' WHERE id = 2;").run();
   }
   legacy.close();
   try {
@@ -302,27 +342,44 @@ test(`existing databases ${hasEditKeys ? "with" : "without"} edit keys migrate s
     const script = `
       const database = await import(${JSON.stringify(databaseModule)});
       const { default: router } = await import(${JSON.stringify(routerModule)});
+      const legacy = database.getLegacyPaste(1);
       const post = database.writeText("new text", "new title");
       const response = await router(new Request("http://localhost/1?EDIT=wrong"));
-      const html = await response.text();
-      const denied = await router(new Request("http://localhost/1?EDIT=wrong", { method: "DELETE" }));
-      const owned = ${hasEditKeys} ? await router(new Request("http://localhost/2?EDIT=legacy-key", {
+      const html = await (await router(new Request(new URL(response.headers.get("Location"), "http://localhost").href))).text();
+      const denied = await router(new Request("http://localhost/" + legacy.slug + "?EDIT=wrong", { method: "DELETE" }));
+      const redirects = [];
+      for (const prefix of ["", "/raw", "/raw/title"]) {
+        const redirect = await router(new Request("http://localhost" + prefix + "/1?EDIT=wrong"));
+        const resolved = await router(new Request(new URL(redirect.headers.get("Location"), "http://localhost").href));
+        redirects.push({ status: redirect.status, location: redirect.headers.get("Location"),
+          resolvedStatus: resolved.status, text: prefix ? await resolved.text() : null });
+      }
+      const ownedRedirect = ${hasEditKeys} ? await router(new Request("http://localhost/2?EDIT=legacy-key", {
+        method: "PUT", body: JSON.stringify({ text: "updated old post", title: "owned title" })
+      })) : null;
+      const owned = ownedRedirect ? await router(new Request(new URL(ownedRedirect.headers.get("Location"), "http://localhost").href, {
         method: "PUT", body: JSON.stringify({ text: "updated old post", title: "owned title" })
       })) : null;
       console.log(JSON.stringify({
-        legacy: database.getPaste(1),
-        editable: database.canEdit(1, post.editKey),
-        newEditable: database.canEdit(post.id, post.editKey),
+        legacy,
+        editable: database.canEdit(legacy.slug, post.editKey),
+        newEditable: database.canEdit(post.slug, post.editKey),
         static: !html.includes("<script>") && !html.includes('id="delete"'),
         unknownPublication: !html.includes('property="article:published_time"'),
         ownedStatus: owned?.status,
-        ownedPublication: ${hasEditKeys} ? database.getPaste(2).created_at : null,
-        createdAt: database.getPaste(post.id).created_at,
+        ownedRedirectStatus: ownedRedirect?.status,
+        ownedRedirectLocation: ownedRedirect?.headers.get("Location"),
+        ownedSlug: ${hasEditKeys} ? database.getLegacyPaste(2).slug : null,
+        ownedPublication: ${hasEditKeys} ? database.getLegacyPaste(2).created_at : null,
+        createdAt: database.getPaste(post.slug).created_at,
+        newNumericStatus: (await router(new Request("http://localhost/" + post.id))).status,
+        redirects,
         denied: denied.status,
         post
       }));
     `;
     const timestamps = new Map<number, string>();
+    let originalSlug: string | undefined;
     for (let attempt = 0; attempt < 2; attempt++) {
       const child = Bun.spawnSync([process.execPath, "-e", script], {
         env: { ...process.env, DATABASE_PATH: databasePath },
@@ -330,7 +387,18 @@ test(`existing databases ${hasEditKeys ? "with" : "without"} edit keys migrate s
       expect(new TextDecoder().decode(child.stderr)).toBe("");
       expect(child.exitCode).toBe(0);
       const result = JSON.parse(new TextDecoder().decode(child.stdout));
-      expect(result.legacy).toEqual({ id: 1, text: "old text", title: "old title", created_at: null });
+      expect(result.legacy).toEqual({ id: 1, slug: result.legacy.slug, text: "old text", title: "old title", created_at: null });
+      expect(result.legacy.slug).toMatch(/^[a-z0-9]{8}$/);
+      if (originalSlug) expect(result.legacy.slug).toBe(originalSlug);
+      else originalSlug = result.legacy.slug;
+      expect(result.post.slug).toMatch(/^[a-z0-9]{8}$/);
+      expect(result.post.slug).not.toBe(result.legacy.slug);
+      expect(result.newNumericStatus).toBe(404);
+      expect(result.redirects).toEqual([
+        { status: 308, location: `/${result.legacy.slug}?EDIT=wrong`, resolvedStatus: 200, text: null },
+        { status: 308, location: `/raw/${result.legacy.slug}?EDIT=wrong`, resolvedStatus: 200, text: "old text" },
+        { status: 308, location: `/raw/title/${result.legacy.slug}?EDIT=wrong`, resolvedStatus: 200, text: "old title" },
+      ]);
       expect(result.editable).toBe(false);
       expect(result.newEditable).toBe(true);
       expect(result.static).toBe(true);
@@ -338,7 +406,9 @@ test(`existing databases ${hasEditKeys ? "with" : "without"} edit keys migrate s
       expect(new Date(result.createdAt).toISOString()).toBe(result.createdAt);
       if (hasEditKeys) {
         expect(result.ownedStatus).toBe(204);
-        expect(result.ownedPublication).toBeNull();
+        expect(result.ownedRedirectStatus).toBe(308);
+        expect(result.ownedRedirectLocation).toBe(`/${result.ownedSlug}?EDIT=legacy-key`);
+        expect(result.ownedPublication).toBe(hasPublicationDates ? "2023-10-01T12:34:56.000Z" : null);
       }
       timestamps.set(result.post.id, result.createdAt);
       expect(result.denied).toBe(403);
@@ -349,9 +419,10 @@ test(`existing databases ${hasEditKeys ? "with" : "without"} edit keys migrate s
         expect(stored.edit_key_hash).toMatch(/^[a-f0-9]{64}$/);
         expect(stored.edit_key_hash).not.toBe(result.post.editKey);
         for (const [id, createdAt] of timestamps) {
-          const saved = inspect.query("SELECT created_at FROM pastes WHERE id = $id;")
-            .get({ $id: id }) as { created_at: string };
+          const saved = inspect.query("SELECT created_at, legacy_url FROM pastes WHERE id = $id;")
+            .get({ $id: id }) as { created_at: string; legacy_url: number };
           expect(saved.created_at).toBe(createdAt);
+          expect(saved.legacy_url).toBe(0);
         }
       } finally {
         inspect.close();

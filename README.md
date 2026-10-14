@@ -16,7 +16,9 @@ This project was created using `bun init` in bun v1.0.0. [Bun](https://bun.sh) i
 
 Copy `.env.example` to `.env` and configure the server before starting it.
 
-Creating a post returns `/<id>?EDIT=<generated key>`. Keep this URL to edit the
+Creating a post returns `/<slug>?EDIT=<generated key>`. Slugs are random,
+unique eight-character strings containing lowercase letters and digits (for
+example, `a7m2k9x4`). Keep this URL to edit the
 title and text or delete the post without an account. Anyone with that URL can
 manage the post. Remove the `EDIT` query parameter before sharing a read-only
 link. Missing or incorrect keys return a static view and cannot change the post.
@@ -24,6 +26,10 @@ link. Missing or incorrect keys return a static view and cannot change the post.
 Existing databases are migrated automatically. Posts created before edit keys
 were introduced remain read-only. Only a hash of each edit key is stored.
 Set `DATABASE_PATH` to use another database file (defaults to `pastes.sqlite`).
+
+Existing posts are assigned slugs automatically, and their old numeric links
+redirect to the new URLs, including raw-text and title links. Edit keys and
+publication dates are preserved. New posts are accessible only by slug.
 
 Post views are rendered entirely on the server and ship no JavaScript. They
 include Open Graph metadata: the post title (or `bin.insanity.cat` when blank),

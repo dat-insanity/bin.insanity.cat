@@ -19,11 +19,11 @@ export default async function create(req: Request) {
   ) return new Response("Invalid request.", { status: 400 });
 
   try {
-    const { id, editKey } = database.writeText(json.text, json.title ?? "");
+    const { slug, editKey } = database.writeText(json.text, json.title ?? "");
     const origin = Bun.env.SERVER_URL
       ? `${Bun.env.PROTOCOL || "http"}://${Bun.env.SERVER_URL}`
       : new URL(req.url).origin;
-    const url = new URL(`/${id}`, origin);
+    const url = new URL(`/${slug}`, origin);
     url.searchParams.set("EDIT", editKey);
     return new Response(url.toString(), { headers: { "Cache-Control": "no-store" } });
   } catch (err) {

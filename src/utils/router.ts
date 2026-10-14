@@ -10,7 +10,7 @@ export default function router(req: Request) {
   if (url.pathname.startsWith("/raw/title/")) return title(req);
   if (url.pathname.startsWith("/raw/")) return raw(req);
   if (url.pathname === "/") return index(req);
-  if (/^\/[1-9]\d*$/.test(url.pathname))
+  if (/^\/(?:[a-z0-9]{8}|[1-9]\d*)$/.test(url.pathname))
     return view(req);
 
   return new Response("404: Page not found.", { status: 404 });
