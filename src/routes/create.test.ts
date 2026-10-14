@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmdirSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import { join } from "node:path";
 Bun.env.DATABASE_PATH = ":memory:";
 const { default: create } = await import("./create");
 const { default: router } = await import("../utils/router");
+const database = await import("../utils/database");
 const url = "http://localhost/create";
 
 async function createPost(text = "sample text", title = "sample title") {
@@ -25,6 +27,10 @@ function mutate(url: URL, method: string, body?: unknown) {
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   }));
+}
+
+function metaContent(html: string, property: string): string | null {
+  return html.match(new RegExp(`<meta property="${property}" content="([^"]*)"`))?.[1] ?? null;
 }
 
 test("rejects non-POST methods", async () => {
@@ -107,7 +113,8 @@ test("missing, empty, wrong, and lowercase keys return only the static view", as
     const html = await response.text();
     expect(html).toContain('id="title">public title</h1>');
     expect(html).toContain('id="paste">public body</p>');
-    expect(html).not.toContain("<script>");
+    expect(html).not.toMatch(/<script\b/i);
+    expect(html).not.toMatch(/<link\b[^>]*\brel=["']modulepreload/i);
     expect(html).not.toContain("<textarea");
     expect(html).not.toContain('id="delete"');
     expect(html).not.toContain('id="save"');
@@ -191,12 +198,103 @@ test("invalid paths and missing posts return 404; unsupported methods return 405
   expect(response.headers.get("Allow")).toBe("GET, PUT, DELETE");
 });
 
-test("existing databases migrate safely and store only hashed keys", () => {
+test("post previews contain the title and full contents on the server", async () => {
+  const text = 'First line: "quoted" & <text>\n' + "Full post contents. ".repeat(30);
+  const editUrl = await createPost(text, 'A "post" & <title>');
+  for (const search of ["", "?EDIT=wrong", editUrl.search]) {
+    const target = new URL(editUrl);
+    target.search = search;
+    const html = await (await router(new Request(target.href))).text();
+    expect(html).toContain("<title>A &quot;post&quot; &amp; &lt;title&gt;</title>");
+    expect(metaContent(html, "og:type")).toBe("article");
+    expect(metaContent(html, "og:title")).toBe("A &quot;post&quot; &amp; &lt;title&gt;");
+    expect(metaContent(html, "og:description")).toBe(
+      "First line: &quot;quoted&quot; &amp; &lt;text&gt;\n" + "Full post contents. ".repeat(30)
+    );
+  }
+});
+
+test("blank titles fall back to bin.insanity.cat in previews and page titles", async () => {
+  for (const title of ["", " \t\n"]) {
+    const editUrl = await createPost("untitled post", title);
+    for (const search of ["", editUrl.search]) {
+      const target = new URL(editUrl);
+      target.search = search;
+      const html = await (await router(new Request(target.href))).text();
+      expect(html).toContain("<title>bin.insanity.cat</title>");
+      expect(metaContent(html, "og:title")).toBe("bin.insanity.cat");
+    }
+  }
+});
+
+test("site_name reports the character count including whitespace and combined emoji", async () => {
+  for (const [text, count] of [["abc", 3], ["😺", 1], ["👩‍👩‍👧‍👦e\u0301\n", 3]] as const) {
+    const editUrl = await createPost(text);
+    editUrl.search = "";
+    const html = await (await router(new Request(editUrl.href))).text();
+    expect(metaContent(html, "og:site_name")).toBe(`${count} ${count === 1 ? "character" : "characters"}`);
+  }
+});
+
+test("publication timestamps are stored at creation and preserved by edits", async () => {
+  const before = Date.now();
+  const editUrl = await createPost();
+  const after = Date.now();
+  const id = editUrl.pathname.slice(1);
+  const createdAt = database.getPaste(id)!.created_at!;
+  expect(createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  expect(Date.parse(createdAt)).toBeGreaterThanOrEqual(before);
+  expect(Date.parse(createdAt)).toBeLessThanOrEqual(after);
+  expect(metaContent(await (await router(new Request(editUrl.href))).text(), "article:published_time"))
+    .toBe(createdAt);
+  expect((await mutate(editUrl, "PUT", { text: "new body", title: "new title" })).status).toBe(204);
+  expect(database.getPaste(id)!.created_at).toBe(createdAt);
+  editUrl.search = "";
+  const html = await (await router(new Request(editUrl.href))).text();
+  expect(metaContent(html, "article:published_time")).toBe(createdAt);
+  expect(metaContent(html, "og:title")).toBe("new title");
+  expect(metaContent(html, "og:description")).toBe("new body");
+  expect(metaContent(html, "og:site_name")).toBe("8 characters");
+});
+
+test("preview and canonical URLs use the public host and exclude edit keys and other queries", async () => {
+  const originalServerUrl = Bun.env.SERVER_URL;
+  const originalProtocol = Bun.env.PROTOCOL;
+  try {
+    Bun.env.SERVER_URL = "bin.insanity.cat";
+    Bun.env.PROTOCOL = "https";
+    const editUrl = await createPost();
+    for (const search of ["?EDIT=wrong&tracking=test", `${editUrl.search}&tracking=test`]) {
+      const internalUrl = `http://localhost${editUrl.pathname}${search}`;
+      const html = await (await router(new Request(internalUrl))).text();
+      const publicUrl = `https://bin.insanity.cat${editUrl.pathname}`;
+      expect(metaContent(html, "og:url")).toBe(publicUrl);
+      expect(html).toContain(`<link rel="canonical" href="${publicUrl}" />`);
+      expect(html).not.toContain(editUrl.searchParams.get("EDIT")!);
+      expect(html).not.toContain("tracking=test");
+    }
+  } finally {
+    if (originalServerUrl === undefined) delete Bun.env.SERVER_URL;
+    else Bun.env.SERVER_URL = originalServerUrl;
+    if (originalProtocol === undefined) delete Bun.env.PROTOCOL;
+    else Bun.env.PROTOCOL = originalProtocol;
+  }
+});
+
+for (const hasEditKeys of [false, true]) {
+test(`existing databases ${hasEditKeys ? "with" : "without"} edit keys migrate safely`, () => {
   const directory = mkdtempSync(join(tmpdir(), "bin-insanity-cat-test-"));
   const databasePath = join(directory, "legacy.sqlite");
   const legacy = new Database(databasePath, { create: true });
-  legacy.query("CREATE TABLE pastes (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, title TINYTEXT);").run();
+  legacy.query(`CREATE TABLE pastes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, title TINYTEXT
+    ${hasEditKeys ? ", edit_key_hash TEXT" : ""}
+  );`).run();
   legacy.query("INSERT INTO pastes (text, title) VALUES ('old text', 'old title');").run();
+  if (hasEditKeys) {
+    legacy.query("INSERT INTO pastes (text, title, edit_key_hash) VALUES ('owned text', 'owned title', $key);")
+      .run({ $key: createHash("sha256").update("legacy-key").digest("hex") });
+  }
   legacy.close();
   try {
     const databaseModule = new URL("../utils/database.ts", import.meta.url).href;
@@ -208,15 +306,23 @@ test("existing databases migrate safely and store only hashed keys", () => {
       const response = await router(new Request("http://localhost/1?EDIT=wrong"));
       const html = await response.text();
       const denied = await router(new Request("http://localhost/1?EDIT=wrong", { method: "DELETE" }));
+      const owned = ${hasEditKeys} ? await router(new Request("http://localhost/2?EDIT=legacy-key", {
+        method: "PUT", body: JSON.stringify({ text: "updated old post", title: "owned title" })
+      })) : null;
       console.log(JSON.stringify({
         legacy: database.getPaste(1),
         editable: database.canEdit(1, post.editKey),
         newEditable: database.canEdit(post.id, post.editKey),
         static: !html.includes("<script>") && !html.includes('id="delete"'),
+        unknownPublication: !html.includes('property="article:published_time"'),
+        ownedStatus: owned?.status,
+        ownedPublication: ${hasEditKeys} ? database.getPaste(2).created_at : null,
+        createdAt: database.getPaste(post.id).created_at,
         denied: denied.status,
         post
       }));
     `;
+    const timestamps = new Map<number, string>();
     for (let attempt = 0; attempt < 2; attempt++) {
       const child = Bun.spawnSync([process.execPath, "-e", script], {
         env: { ...process.env, DATABASE_PATH: databasePath },
@@ -224,10 +330,17 @@ test("existing databases migrate safely and store only hashed keys", () => {
       expect(new TextDecoder().decode(child.stderr)).toBe("");
       expect(child.exitCode).toBe(0);
       const result = JSON.parse(new TextDecoder().decode(child.stdout));
-      expect(result.legacy).toEqual({ id: 1, text: "old text", title: "old title" });
+      expect(result.legacy).toEqual({ id: 1, text: "old text", title: "old title", created_at: null });
       expect(result.editable).toBe(false);
       expect(result.newEditable).toBe(true);
       expect(result.static).toBe(true);
+      expect(result.unknownPublication).toBe(true);
+      expect(new Date(result.createdAt).toISOString()).toBe(result.createdAt);
+      if (hasEditKeys) {
+        expect(result.ownedStatus).toBe(204);
+        expect(result.ownedPublication).toBeNull();
+      }
+      timestamps.set(result.post.id, result.createdAt);
       expect(result.denied).toBe(403);
       const inspect = new Database(databasePath);
       try {
@@ -235,6 +348,11 @@ test("existing databases migrate safely and store only hashed keys", () => {
           .get({ $id: result.post.id }) as { edit_key_hash: string };
         expect(stored.edit_key_hash).toMatch(/^[a-f0-9]{64}$/);
         expect(stored.edit_key_hash).not.toBe(result.post.editKey);
+        for (const [id, createdAt] of timestamps) {
+          const saved = inspect.query("SELECT created_at FROM pastes WHERE id = $id;")
+            .get({ $id: id }) as { created_at: string };
+          expect(saved.created_at).toBe(createdAt);
+        }
       } finally {
         inspect.close();
       }
@@ -244,3 +362,4 @@ test("existing databases migrate safely and store only hashed keys", () => {
     rmdirSync(directory);
   }
 });
+}

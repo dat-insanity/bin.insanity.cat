@@ -7,7 +7,8 @@ db.query(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     text TEXT,
     title TINYTEXT,
-    edit_key_hash TEXT
+    edit_key_hash TEXT,
+    created_at TEXT
   );`
 ).run();
 
@@ -16,8 +17,17 @@ const columns = db.query("PRAGMA table_info(pastes);").all() as { name: string }
 if (!columns.some((column) => column.name === "edit_key_hash")) {
   db.query("ALTER TABLE pastes ADD COLUMN edit_key_hash TEXT;").run();
 }
+// The original publication time of existing posts is unknown.
+if (!columns.some((column) => column.name === "created_at")) {
+  db.query("ALTER TABLE pastes ADD COLUMN created_at TEXT;").run();
+}
 
-export type Paste = { id: number; text: string; title: string | null };
+export type Paste = {
+  id: number;
+  text: string;
+  title: string | null;
+  created_at: string | null;
+};
 
 function hashKey(editKey: string): string {
   return createHash("sha256").update(editKey).digest("hex");
@@ -25,16 +35,18 @@ function hashKey(editKey: string): string {
 
 export function writeText(text: string, title: string): { id: number; editKey: string } {
   const editKey = randomBytes(32).toString("hex");
+  const createdAt = new Date().toISOString();
   db.query(
-    `INSERT INTO pastes (title, text, edit_key_hash) VALUES ($title, $text, $key);`
-  ).run({ $text: text, $title: title, $key: hashKey(editKey) });
+    `INSERT INTO pastes (title, text, edit_key_hash, created_at)
+     VALUES ($title, $text, $key, $createdAt);`
+  ).run({ $text: text, $title: title, $key: hashKey(editKey), $createdAt: createdAt });
 
   const result = db.query("SELECT last_insert_rowid() AS id;").get() as { id: number };
   return { id: result.id, editKey };
 }
 
 export function getPaste(id: number | string): Paste | null {
-  return db.query("SELECT id, text, title FROM pastes WHERE id = $id;")
+  return db.query("SELECT id, text, title, created_at FROM pastes WHERE id = $id;")
     .get({ $id: id }) as Paste | null;
 }
 
