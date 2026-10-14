@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>bin.insanity.cat</title>
+    <script>
+      window.onload = function () {
+        const textarea = document.getElementById("paste");
+        const titleInput = document.getElementById("title");
+        const saveBtn = document.getElementById("save");
+        const deleteBtn = document.getElementById("delete");
+        const status = document.getElementById("status");
+        const editUrl = window.location.pathname + window.location.search;
+
+        function resize() {
+          textarea.style.height = "auto";
+          textarea.style.height = textarea.scrollHeight + "px";
+        }
+        function setBusy(busy) {
+          saveBtn.disabled = busy;
+          deleteBtn.disabled = busy;
+          titleInput.disabled = busy;
+          textarea.disabled = busy;
+        }
+
+        textarea.addEventListener("input", resize);
+        resize();
+
+        saveBtn.addEventListener("click", async function () {
+          setBusy(true);
+          status.textContent = "Saving...";
+          try {
+            const response = await fetch(editUrl, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: textarea.value, title: titleInput.value }),
+            });
+            if (!response.ok) throw new Error(await response.text());
+            status.textContent = "Saved.";
+          } catch (error) {
+            status.textContent = error.message;
+          } finally {
+            setBusy(false);
+          }
+        });
+
+        deleteBtn.addEventListener("click", async function () {
+          if (!window.confirm("Delete this post? This cannot be undone.")) return;
+          setBusy(true);
+          status.textContent = "Deleting...";
+          try {
+            const response = await fetch(editUrl, { method: "DELETE" });
+            if (!response.ok) throw new Error(await response.text());
+            window.location.href = "/";
+          } catch (error) {
+            status.textContent = error.message;
+            setBusy(false);
+          }
+        });
+      };
+    </script>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "San Francisco",
+          "Helvetica Neue", sans-serif;
+        background: #121212;
+        color: white;
+      }
+      header {
+        background: #1e1e1e;
+        padding: 15px 30px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        justify-content: space-between;
+        align-items: center;
+      }
+      h1 {
+        margin: 0;
+        font-size: 24px;
+      }
+      .container {
+        max-width: 800px;
+        margin: 30px auto;
+        padding: 0 15px;
+      }
+      .mainbutton {
+        background-color: #006ee4;
+        color: white;
+        padding: 6px 14px;
+        border: none;
+        border-radius: 8px;
+        font-size: 18px;
+        cursor: pointer;
+        transition: background-color 0.3s;
+        font-weight: 500;
+      }
+      .sidebutton {
+        background-color: transparent;
+        color: white;
+        border: none;
+        font-size: 18px;
+        cursor: pointer;
+        margin-right: 12px;
+        font-weight: 500;
+        text-decoration: none;
+      }
+      .mainbutton:hover {
+        background-color: #005bd5;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+      textarea {
+        background: transparent;
+        color: white;
+        font-size: 18px;
+        line-height: 1.4;
+        border: none;
+        outline: none;
+        resize: none;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      input {
+        background: transparent;
+        color: white;
+        font-size: 32px;
+        line-height: 2;
+        border: none;
+        outline: none;
+        width: 100%;
+        box-sizing: border-box;
+        font-weight: 700;
+      }
+      .hint,
+      #status {
+        color: #b3b3b3;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      div svg {
+        fill: none;
+        stroke-width: 1.5;
+        stroke: currentColor;
+        width: 24px;
+        height: 24px;
+        padding-top: 2px;
+        padding-right: 8px;
+        animation: color-animation 20s infinite linear;
+      }
+      header div {
+        display: flex;
+        align-items: center;
+      }
+      .blinking {
+        animation: blink 1.5s steps(1, start) infinite;
+      }
+      @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0; }
+      }
+      @keyframes color-animation {
+        0%, 100% { color: rgb(255, 255, 255); }
+        20% { color: rgb(20, 255, 20); }
+        40% { color: rgb(50, 50, 255); }
+        60% { color: rgb(255, 255, 20); }
+        80% { color: rgb(255, 20, 20); }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
+          />
+        </svg>
+        <h1>bin.insanity.cat<span class="blinking"> _</span></h1>
+      </div>
+      <div>
+        <a class="sidebutton" href="/">new</a>
+        <button class="sidebutton" id="delete">delete</button>
+        <button class="mainbutton" id="save">save</button>
+      </div>
+    </header>
+    <main class="container">
+      <input type="text" id="title" name="title" placeholder="untitled"
+        aria-label="Post title" value="{{TITLE}}" />
+      <textarea id="paste" rows="1" aria-label="Post text">
+{{TEXT}}</textarea>
+      <p class="hint">Keep this URL to edit or delete your post. Remove <code>?EDIT=...</code> before sharing a read-only link.</p>
+      <p id="status" role="status" aria-live="polite"></p>
+    </main>
+  </body>
+</html>

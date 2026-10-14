@@ -26,16 +26,25 @@
           textarea.value = "";
         });
 
-        sendBtn.addEventListener("click", function () {
+        sendBtn.addEventListener("click", async function () {
+          const status = document.getElementById("status");
           const text = textarea.value;
           const title = titleInput.value;
-          fetch("/create", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: text, title: title }),
-          })
-            .then((response) => response.text())
-            .then((data) => (window.location.href = data));
+          sendBtn.disabled = true;
+          status.textContent = "Saving...";
+          try {
+            const response = await fetch("/create", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text, title }),
+            });
+            const data = await response.text();
+            if (!response.ok) throw new Error(data);
+            window.location.href = data;
+          } catch (error) {
+            status.textContent = error.message;
+            sendBtn.disabled = false;
+          }
         });
       };
     </script>
@@ -197,6 +206,7 @@
         rows="1"
         tabindex="2"
       ></textarea>
+      <p id="status" role="status" aria-live="polite"></p>
     </main>
   </body>
 </html>
